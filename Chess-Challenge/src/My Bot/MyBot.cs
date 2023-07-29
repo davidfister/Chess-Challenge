@@ -3,11 +3,14 @@
 public class MyBot : IChessBot
 {
     Timer globalTimer;
+    System.Collections.Generic.Dictionary<ulong, double> evalDict = new System.Collections.Generic.Dictionary<ulong, double>();
     public Move Think(Board board, Timer timer)
     {
         globalTimer = timer;
+        if(BitboardHelper.GetNumberOfSetBits(board.AllPiecesBitboard) <= 8){
+            return search(board,6);
+        }
         return search(board,4);
-        
     }
     
     private double eval(Board board)
@@ -21,6 +24,8 @@ public class MyBot : IChessBot
         i += pl[3].Count*5 - pl[9].Count*5;
         i += pl[4].Count*9 - pl[10].Count*9;
 
+        i += BitboardHelper.GetNumberOfSetBits(board.WhitePiecesBitboard) - BitboardHelper.GetNumberOfSetBits(board.BlackPiecesBitboard);
+
         if (board.IsDraw()) i = 0;
         if (board.IsInCheckmate() && board.IsWhiteToMove){
             i = -9999;
@@ -28,8 +33,8 @@ public class MyBot : IChessBot
         if (board.IsInCheckmate() && !board.IsWhiteToMove){
             i = 9999;
         }
-        System.Random random = new System.Random();
-        return i + random.NextDouble()*0.01-random.NextDouble()*0.01;
+       
+        return i;
     }
 
     private System.Span<Move> sortMoves(System.Span<Move> moves){
@@ -38,7 +43,7 @@ public class MyBot : IChessBot
         int i = 0;
         int j = moves.Length - 1;
         foreach(Move m in moves){
-            if(m.IsCapture){
+            if(m.CapturePieceType is PieceType.Queen || m.CapturePieceType is PieceType.Rook){
                 returnArray[i] = m;
                 i++;
             }
@@ -62,7 +67,7 @@ public class MyBot : IChessBot
         moves = sortMoves(moves);
         foreach (Move m in moves){
             board.MakeMove(m);
-            double result = alphabeta(board, depth-1,-99999,99999, board.IsWhiteToMove);
+            double result = alphabeta(board, depth-1,-99999,99999, board.IsWhiteToMove, m.TargetSquare, false);
             board.UndoMove(m);
             if (board.IsWhiteToMove){
                 if (result > currentMax){
@@ -82,8 +87,12 @@ public class MyBot : IChessBot
         }
         return bestMove;
     }
-    private double alphabeta(Board board, int depth, double alpha, double beta, bool isMaximizing)
+    private double alphabeta(Board board, int depth, double alpha, double beta, bool isMaximizing, Square lastCaptureSquare, bool isProlongedSearch)
     {
+        double r;
+        if(evalDict.TryGetValue(board.ZobristKey, out r)){
+            return r;
+        }
         System.Span<Move> moves = stackalloc Move[256];
         board.GetLegalMovesNonAlloc(ref moves);
         if(depth <= 0 || moves.Length == 0){
@@ -99,7 +108,9 @@ public class MyBot : IChessBot
             {
                 board.MakeMove(m);
                 
-                double result = alphabeta(board, (m.IsCapture && depth == 1) ? depth : depth -1, alpha, beta, !isMaximizing); //todo
+                double result = (m.IsCapture && depth == 1) ? 
+                (isProlongedSearch && m.TargetSquare == lastCaptureSquare) ? alphabeta(board, 1, alpha, beta, !isMaximizing, m.TargetSquare, true) : eval(board) : 
+                alphabeta(board, depth -1, alpha, beta, !isMaximizing, m.TargetSquare, false); //todo
                 
                 maxValue = System.Math.Max(maxValue, result);
                 alpha = System.Math.Max(alpha, result);
@@ -113,6 +124,11 @@ public class MyBot : IChessBot
                 }
                 
             }
+            if(evalDict.TryGetValue(board.ZobristKey, out r)){
+                System.Console.Write("Hi");
+                evalDict.Add(board.ZobristKey, maxValue);
+            }
+            
             return maxValue;
         }
         else{ //black
@@ -122,8 +138,9 @@ public class MyBot : IChessBot
                 board.MakeMove(m);
            
                 
-                double result = alphabeta(board, (m.IsCapture && depth == 1) ? depth : depth -1, alpha, beta, !isMaximizing); //todo
-
+                double result = (m.IsCapture && depth == 1) ? 
+                (isProlongedSearch && m.TargetSquare == lastCaptureSquare) ? alphabeta(board, 1, alpha, beta, !isMaximizing, m.TargetSquare, true) : eval(board) : 
+                alphabeta(board, depth -1, alpha, beta, !isMaximizing, m.TargetSquare, false); //todo
 
                 minValue = System.Math.Min(minValue, result);
                 beta = System.Math.Min(beta, result);
@@ -134,6 +151,10 @@ public class MyBot : IChessBot
                     board.UndoMove(m);
                 }
                 
+            }
+            if(evalDict.TryGetValue(board.ZobristKey, out r)){
+                System.Console.WriteLine("Hi");
+                evalDict.Add(board.ZobristKey, minValue);
             }
             return minValue;
         }
